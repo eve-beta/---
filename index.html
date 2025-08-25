@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>ラングトンのアリ</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+</head>
+<body>
+<script>
+let cellSize = 10;
+let ant = {x:0, y:0, dir:0, color:"red"};
+let black = new Set();   // 現在の黒セル
+let initialBlack = new Set(); // リセット用のユーザー黒セルスナップショット
+let red = new Set(); 
+let running = false;
+let fireworks = [];
+let stepCount = 0;
+
+let offsetX, offsetY, scaleFactor = 1;
+let dragging = false, dragStartX, dragStartY;
+
+let stepsPerFrame = 1;
+
+let startBtn, targetBtn;
+let uiElements = [];
+
+function setup() {
+  let canvas = createCanvas(1200, 800);
+  frameRate(60);
+  
+  offsetX = 0;
+  offsetY = 0;
+  
+  // UI
+  startBtn = createButton("スタート");
+  startBtn.mousePressed(toggleRunning);
+  uiElements.push(startBtn);
+  startBtn.position(260, height + 20);
+
+  let resetBtn = createButton("リセット");
+  resetBtn.mousePressed(resetSim);
+  uiElements.push(resetBtn);
+  resetBtn.position(340, height + 20);
+
+  let stepBtn = createButton("一歩ずつ");
+  stepBtn.mousePressed(stepAntOnce);
+  uiElements.push(stepBtn);
+  stepBtn.position(420, height + 20);
+
+  let clearBtn = createButton("線を削除");
+  clearBtn.mousePressed(clearCells);
+  uiElements.push(clearBtn);
+  clearBtn.position(500, height + 20);
+
+  targetBtn = createButton("ターゲット生成");
+  targetBtn.mousePressed(toggleTarget);
+  uiElements.push(targetBtn);
+  targetBtn.position(820, height + 20);
+
+  speedLabel = createSpan(" スピード：");
+  speedLabel.position(580, height + 20); 
+  let speedSlider = createSlider(1, 500, 1, 10);
+  speedSlider.input(() => {
+    stepsPerFrame = speedSlider.value();
+  });
+  uiElements.push(speedSlider);
+  speedSlider.position(660, height + 24);
+
+  canvas.elt.onwheel = e => e.preventDefault();
+  canvas.elt.oncontextmenu = () => false;
+}
+
+function draw() {
+  background(255);
+  translate(width/2 + offsetX - cellSize/2, height/2 + offsetY - cellSize/2);
+  scale(scaleFactor);
+  
+  if (running) {
+    for (let i=0; i<stepsPerFrame; i++) {
+      stepAntOnce();
+    }
+  }
+  
+  drawCells();
+  drawAnt();
+  drawFireworks();
+
+  resetMatrix();
+  fill(0);
+  textSize(20);
+  text("歩数: " + stepCount, 10, 30);
+}
+
+// 描画
+function drawCells() {
+  fill(0);
+  noStroke();
+  for (let c of black) {
+    let [x,y] = c.split(",").map(Number);
+    rect(x*cellSize, y*cellSize, cellSize, cellSize);
+  }
+  fill("red");
+  for (let c of red) {
+    let [x,y] = c.split(",").map(Number);
+    rect(x*cellSize, y*cellSize, cellSize, cellSize);
+  }
+}
+
+function drawAnt() {
+  fill(ant.color);
+  let px = ant.x * cellSize + cellSize/2;
+  let py = ant.y * cellSize + cellSize/2;
+  let s = cellSize*0.8;
+  push();
+  translate(px, py);
+  rotate(HALF_PI * ant.dir);
+  triangle(-s/2, s/2, s/2, s/2, 0, -s/2);
+  pop();
+}
+
+// アリの処理
+function stepAntOnce() {
+  let key = ant.x + "," + ant.y;
+  if (red.has(key)) {
+    fireworks.push(new Firework(ant.x*cellSize, ant.y*cellSize));
+  }
+
+  if (black.has(key)) {
+    black.delete(key);
+    ant.dir = (ant.dir + 3) % 4; // 左回転
+  } else {
+    black.add(key);
+    ant.dir = (ant.dir + 1) % 4; // 右回転
+  }
+
+  if (ant.dir === 0) ant.y -= 1;
+  if (ant.dir === 1) ant.x += 1;
+  if (ant.dir === 2) ant.y += 1;
+  if (ant.dir === 3) ant.x -= 1;
+
+  stepCount++;
+}
+
+// 入力処理
+function mousePressed() {
+  if (mouseX < 0 || mouseX > width || mouseY < 0 || mouseY > height) return;
+  if (isOverUI(mouseX, mouseY)) return;
+
+  if (mouseButton === CENTER) {
+    dragging = true;
+    dragStartX = mouseX - offsetX;
+    dragStartY = mouseY - offsetY;
+  } else {
+    paintCell(mouseX, mouseY);
+  }
+}
+
+function mouseDragged() {
+  if (isOverUI(mouseX, mouseY)) return;
+
+  if (dragging) {
+    offsetX = mouseX - dragStartX;
+    offsetY = mouseY - dragStartY;
+  } else {
+    paintCell(mouseX, mouseY);
+  }
+}
+
+function mouseReleased() { dragging = false; }
+
+function paintCell(mx, my) {
+  let pos = screenToGrid(mx, my);
+  if (!pos) return;
+  let key = pos.x + "," + pos.y;
+  if (mouseButton === LEFT) {
+    black.add(key);
+    initialBlack.add(key);
+  } else if (mouseButton === RIGHT) {
+    black.delete(key);
+    initialBlack.delete(key);
+  }
+}
+
+function mouseWheel(event) {
+  let zoom = event.delta > 0 ? 0.9 : 1.1;
+  let mx = mouseX - width/2 - offsetX;
+  let my = mouseY - height/2 - offsetY;
+  offsetX -= mx * (zoom - 1);
+  offsetY -= my * (zoom - 1);
+  scaleFactor *= zoom;
+}
+
+// 管理関数
+function toggleRunning() {
+  running = !running;
+  startBtn.html(running ? "ストップ" : "スタート");
+}
+
+function resetSim() {
+  black = new Set(initialBlack);
+  ant = {x:0,y:0,dir:0,color:"red"};
+  fireworks = [];
+  stepCount = 0;
+  offsetX = 0;
+  offsetY = 0;
+  scaleFactor = 1;
+}
+
+function clearCells() {
+  black.clear();
+  initialBlack.clear();
+}
+
+function toggleTarget() {
+  if (red.size === 0) {
+    addRandomTarget();
+    targetBtn.html("ターゲット削除");
+  } else {
+    red.clear();
+    targetBtn.html("ターゲット生成");
+  }
+}
+
+function addRandomTarget() {
+  let x = floor(random(-80, 80));
+  let y = floor(random(-60, 60));
+  red.add(x + "," + y);
+}
+
+function screenToGrid(mx, my) {
+  let gx = (mx - width/2 - offsetX + cellSize/2) / scaleFactor;
+  let gy = (my - height/2 - offsetY + cellSize/2) / scaleFactor;
+  let x = Math.floor(gx / cellSize);
+  let y = Math.floor(gy / cellSize);
+  return {x,y};
+}
+
+function isOverUI(mx, my) {
+  for (let el of uiElements) {
+    let b = el.elt.getBoundingClientRect();
+    if (mx >= b.left && mx <= b.right && my >= b.top && my <= b.bottom) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// 花火
+class Firework {
+  constructor(x,y) {
+    this.x = x;
+    this.y = y;
+    this.particles = [];
+    for (let i=0; i<50; i++) {
+      this.particles.push({angle: random(TWO_PI), speed: random(2,5), life: 60});
+    }
+  }
+  draw() {
+    strokeWeight(2);
+    for (let p of this.particles) {
+      if (p.life > 0) {
+        let px = this.x + cos(p.angle)*p.speed*(60-p.life);
+        let py = this.y + sin(p.angle)*p.speed*(60-p.life);
+        stroke(random(255),random(255),random(255));
+        point(px,py);
+        p.life--;
+      }
+    }
+  }
+}
+
+function drawFireworks() {
+  for (let f of fireworks) f.draw();
+  fireworks = fireworks.filter(f => f.particles.some(p => p.life>0));
+}
+</script>
+</body>
+</html>
